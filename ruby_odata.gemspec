@@ -14,7 +14,7 @@ Gem::Specification.new do |s|
 
   s.rubyforge_project = "ruby-odata"
 
-  s.add_dependency('activesupport', '>= 2.3.5')
+  s.add_dependency('json')
   s.add_dependency('rest-client', '>= 1.5.1')
   s.add_dependency('nokogiri', '>= 1.4.2')
   
