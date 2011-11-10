@@ -14,4 +14,4 @@ Gemfile.lock
 pkg/*
 test/applicationhost.config
 .rvmrc
-
+.DS_Store
