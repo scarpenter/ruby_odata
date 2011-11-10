@@ -2,9 +2,9 @@ lib =  File.dirname(__FILE__)
 
 $: << lib + '/ruby_odata/'
 require 'rubygems'
-require 'active_support' # Used for serializtion to JSON
-require 'active_support/inflector'
-require 'active_support/core_ext'
+require 'json' # Used for serializtion to JSON
+#require 'active_support/inflector'
+#require 'active_support/core_ext'
 require 'cgi'
 require 'rest_client'
 require 'nokogiri'
