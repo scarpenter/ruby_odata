@@ -3,7 +3,7 @@ Given /^an ODataService exists with uri: "([^\"]*)"$/ do |uri|
 end
 
 Given /^a sample HTTP ODataService exists$/ do
-  @service = OData::Service.new("http://localhost:#{HTTP_PORT_NUMBER}/SampleService/Entities.svc")
+  @service = OData::Service.new("#{TEST_SERVICE_URI}/SampleService/Entities.svc")
 end
 
 Given /^an ODataService exists with uri: "([^\"]*)" using username "([^\"]*)" and password "([^\"]*)"$/ do |uri, username, password|

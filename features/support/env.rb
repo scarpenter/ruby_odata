@@ -13,4 +13,4 @@ if !File.exists?("#{root_dir}/TestDB.mdf")
   FileUtils.copy("#{root_dir}/_TestDB_Log.ldf", "#{root_dir}/TestDB_Log.ldf")
 end
 
-HTTP_PORT_NUMBER = 8989
+TEST_SERVICE_URI = ENV.include?("ODATA_TEST_SERVICE") ? ENV["ODATA_TEST_SERVICE"] : "http://localhost:8989"
