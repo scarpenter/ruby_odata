@@ -11,13 +11,11 @@ class Service
   # - password: password for http basic auth
   # - verify_ssl: false if no verification, otherwise mode (OpenSSL::SSL::VERIFY_PEER is default)
   # - additional_params: a hash of query string params that will be passed on all calls
+  # - eager_partial: true (default) if queries should consume partial feeds until the feed is complete, false if explicit calls to next must be performed
   def initialize(service_uri, options = {})
     @uri = service_uri.gsub!(/\/?$/, '')
-    @options = options    
-    @rest_options = { :verify_ssl => get_verify_mode, :user => @options[:username], :password => @options[:password] }
-    @collections = []
-    @save_operations = []
-    @additional_params = options[:additional_params] || {}
+    set_options! options
+    default_instance_vars!
     build_collections_and_classes
   end
   
@@ -70,7 +68,7 @@ class Service
       @save_operations << Operation.new("Update", type, obj)
     else
       raise "You cannot update a non-tracked entity"
-    end		
+    end	
   end
   
   # Performs save operations (Create/Update/Delete) against the server
@@ -92,10 +90,10 @@ class Service
     return result
   end
 
-  # Performs query operations (Read) against the server
+  # Performs query operations (Read) against the server, returns an array of record instances.
   def execute        
     result = RestClient::Resource.new(build_query_uri, @rest_options).get
-    build_classes_from_result(result)
+    handle_collection_result(result)
   end
   
   # Overridden to identify methods handled by method_missing  
@@ -115,7 +113,35 @@ class Service
     end
   end
   
+  # Retrieves the next resultset of a partial result (if any). Does not honor the :eager_partial option.
+  def next
+    return if not partial?
+    handle_partial
+  end
+  
+  # Does the most recent collection returned represent a partial collection? Will aways be false if a query hasn't executed, even if the query would have a partial
+  def partial?
+    @has_partial
+  end
+
+  
   private
+
+  def set_options!(options)
+    @options = options
+    if @options[:eager_partial].nil?
+      @options[:eager_partial] = true
+    end
+    @rest_options = { :verify_ssl => get_verify_mode, :user => @options[:username], :password => @options[:password] }
+    @additional_params = options[:additional_params] || {}
+  end
+  
+  def default_instance_vars!
+    @collections = []
+    @save_operations = []
+    @has_partial = false
+    @next_uri = nil
+  end
 
   # Gets ssl certificate verification mode, or defaults to verify_peer
   def get_verify_mode
@@ -151,13 +177,12 @@ class Service
 
     entity_types = doc.xpath("//edm:EntityType", "edm" => edm_ns)
     entity_types.each do |e|
-      name = e['Name']
-      props = e.xpath(".//edm:Property", "edm" => edm_ns)
-      @class_metadata[name] = build_property_metadata(props)
-      methods = props.collect { |p| p['Name'] } # Standard Properties
+      next if e['Abstract'] == "true"
+      klass_name = e['Name']
+      methods = collect_properties(klass_name,edm_ns, e, doc)
       nprops =  e.xpath(".//edm:NavigationProperty", "edm" => edm_ns)			
       nav_props = nprops.collect { |p| p['Name'] } # Navigation Properties
-      @classes[name] = ClassBuilder.new(name, methods, nav_props).build unless @classes.keys.include?(name)
+      @classes[klass_name] = ClassBuilder.new(klass_name, methods, nav_props).build unless @classes.keys.include?(klass_name)
     end
   end
   
@@ -169,12 +194,42 @@ class Service
     end
     metadata
   end
+  
+  # Handle parsing of OData Atom result and return an array of Entry classes
+  def handle_collection_result(result)
+    results = build_classes_from_result(result)
+    while partial? && @options[:eager_partial]
+      results.concat handle_partial
+    end
+    results
+  end
+  
+
+  def collect_properties(klass_name, edm_ns, element, doc)
+    props = element.xpath(".//edm:Property", "edm" => edm_ns)
+    @class_metadata[klass_name] = build_property_metadata(props)
+    methods = props.collect { |p| p['Name'] }
+    unless element["BaseType"].nil?
+      base = element["BaseType"].split(".").last()
+      baseType = doc.xpath("//edm:EntityType[@Name=\"#{base}\"]",
+                           "edm" => edm_ns).first()
+      props = baseType.xpath(".//edm:Property", "edm" => edm_ns)
+      @class_metadata[klass_name].merge!(build_property_metadata(props))
+      methods = methods.concat(props.collect { |p| p['Name']})
+    end
+    methods
+  end
 
   # Helper to loop through a result and create an instance for each entity in the results
   def build_classes_from_result(result)
     doc = Nokogiri::XML(result)
+    
+    is_links = doc.at_xpath("/ds:links", "ds" => "http://schemas.microsoft.com/ado/2007/08/dataservices")
+    return parse_link_results(doc) if is_links
+    
     entries = doc.xpath("//atom:entry[not(ancestor::atom:entry)]", "atom" => "http://www.w3.org/2005/Atom")
-    return entry_to_class(entries[0]) if entries.length == 1
+    
+    extract_partial(doc)
     
     results = []
     entries.each do |entry|
@@ -254,6 +309,32 @@ class Service
     
     klass
   end
+  
+  # Tests for and extracts the next href of a partial
+  def extract_partial(doc)
+    next_links = doc.xpath('//atom:link[@rel="next"]', "atom" => "http://www.w3.org/2005/Atom")
+    @has_partial = next_links.any?
+    @next_uri = next_links[0]['href'] if @has_partial
+  end
+  
+  def handle_partial
+    if @next_uri
+      result = RestClient::Resource.new(@next_uri, @rest_options).get
+      results = handle_collection_result(result)
+    end
+    results
+  end
+  
+  # Handle link results
+  def parse_link_results(doc)
+    uris = doc.xpath("/ds:links/ds:uri", "ds" => "http://schemas.microsoft.com/ado/2007/08/dataservices")
+    results = []
+    uris.each do |uri_el|
+      link = uri_el.content
+      results << URI.parse(link)
+    end
+    results
+  end   
 
   # Build URIs
   def build_metadata_uri
@@ -315,7 +396,6 @@ class Service
     batch_uri = build_batch_uri
     
     body = build_batch_body(operations, batch_num, changeset_num)
-    
     result = RestClient::Resource.new( batch_uri, @rest_options).post body, {:content_type => "multipart/mixed; boundary=batch_#{batch_num}"}
 
     # TODO: More result validation needs to be done.  
