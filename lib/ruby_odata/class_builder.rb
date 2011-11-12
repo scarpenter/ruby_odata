@@ -8,7 +8,7 @@ module OData
     # - methods:			The accessor methods to add to the class
     # - nav_props:		The accessor methods to add for navigation properties
     def initialize(klass_name, methods, nav_props)
-      @klass_name = camelcase(klass_name)
+      @klass_name = klass_name.camelcase
       @methods = methods
       @nav_props = nav_props
     end
@@ -23,13 +23,13 @@ module OData
           
       # return if we can find constant corresponding to class name
       if Object.const_defined? @klass_name
-        @klass = constantize(@klass_name)
+        @klass = @klass_name.constantize
         return @klass
       end
 
       #Object.const_set(@klass_name, Class.new.extend(ActiveSupport::JSON))
       Object.const_set(@klass_name, Class.new)
-      @klass = constantize(@klass_name)
+      @klass = @klass_name.constantize
       @klass.class_eval do
         include OData
       end
@@ -113,21 +113,6 @@ module OData
           instance_variable_set("@#{method_name}", value)
         end
       end
-    end
-    
-    def camelcase(word)
-      word.to_s.gsub(/\/(.?)/) { "::#{$1.upcase}" }.gsub(/(?:^|_)(.)/) { $1.upcase }
-    end
-    
-    def constantize(camel_cased_word)
-      names = camel_cased_word.split('::')
-      names.shift if names.empty? || names.first.empty?
-
-      constant = Object
-      names.each do |name|
-        constant = constant.const_defined?(name) ? constant.const_get(name) : constant.const_missing(name)
-      end
-      constant
     end
   end
 end # module OData
