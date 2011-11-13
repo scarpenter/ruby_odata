@@ -13,4 +13,12 @@ class Object
     end
     constant
   end
+  
+  def to_json(args)
+    hash = {}
+    self.instance_variables.each do |var|
+      hash[var.to_s.sub("@", "")] = self.instance_variable_get var
+    end
+    hash.to_json
+  end
 end
